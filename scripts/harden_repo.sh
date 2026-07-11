@@ -26,11 +26,18 @@ REPO_NWO="$(gh repo view --json nameWithOwner --jq .nameWithOwner)"
 BASE="repos/$REPO_NWO"
 echo "Hardening $REPO_NWO"
 
+# The builder is designed to run private. Public is allowed (free macOS
+# minutes) but has real trade-offs, so warn loudly and continue rather than
+# refuse - the Actions-hardening settings below apply to public repos too.
 VISIBILITY="$(gh repo view --json visibility --jq .visibility | tr '[:upper:]' '[:lower:]')"
 if [ "$VISIBILITY" != "private" ]; then
-    echo "ERROR: repository must be private (is: $VISIBILITY). Fix that first:" >&2
-    echo "  gh repo edit $REPO_NWO --visibility private" >&2
-    exit 1
+    echo "WARNING: repository is $VISIBILITY, not private." >&2
+    echo "  Public repos get free macOS minutes, but their workflow artifacts" >&2
+    echo "  (the unsigned IPAs), build logs, and repo contents are visible to" >&2
+    echo "  anyone during the retention window. To switch to private (which" >&2
+    echo "  re-imposes the 10x macOS billing multiplier):" >&2
+    echo "    gh repo edit $REPO_NWO --visibility private" >&2
+    echo "  Continuing with the settings that apply to a $VISIBILITY repo..." >&2
 fi
 
 step() { echo ""; echo "== $1"; }

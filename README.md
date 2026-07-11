@@ -8,6 +8,25 @@ embedded provisioning profile, **not installable as-is**. Signing is your own
 separate downstream step, with your own credentials, which never touch this
 repository.
 
+## Ask for a build in one line
+
+In a Claude Code session on this repo, just say what you want:
+
+> Build me an unsigned IPA of `OWNER/REPO` at the latest release
+
+(or give an app name to resolve). Claude confirms the exact repository and ref
+with you first, then runs the whole loop — find the official source, check the
+license, pin the commit, probe, write a new target manifest (plus an adapter if
+the project needs one), dispatch the build, watch it to green, and hand you the
+IPA filename, its SHA-256, and the `gh run download` command to pull it locally.
+You never edit manifests or workflows by hand.
+
+**Boundaries:** it builds open-source apps that ship their source with a license
+(not closed-source App Store apps — there is no source to build), and the output
+is always unsigned and needs your own signing step before it will install.
+Committed manifests under `targets/` are immutable records of past builds, never
+defaults — every build starts by asking which repo/ref you want.
+
 ## What it does
 
 1. You (or Claude Code) pin a public, explicitly-licensed iOS source repo to
