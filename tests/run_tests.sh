@@ -22,6 +22,16 @@ else
     echo "NOTE: shellcheck not installed; skipping lint (bash -n still ran)"
 fi
 
+# --- 1b. no Bash 4+ constructs (macOS runners ship Bash 3.2) ------------------
+for f in scripts/*.sh bin/* adapters/*.sh; do
+    [ -e "$f" ] || continue
+    if grep -nE '(mapfile|readarray|declare[[:space:]]+-A|\$\{[A-Za-z_]+\^\^|\$\{[A-Za-z_]+,,)' "$f" >/dev/null; then
+        fail "$f: uses a Bash 4+ construct (breaks on macOS /bin/bash 3.2)"
+    else
+        pass "$f: no Bash 4+ constructs"
+    fi
+done
+
 # --- 2. python syntax --------------------------------------------------------
 for f in scripts/*.py; do
     if python3 -m py_compile "$f" 2>/dev/null; then pass "py_compile $f"; else fail "py_compile $f"; fi

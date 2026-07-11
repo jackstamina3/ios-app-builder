@@ -56,10 +56,13 @@ fi
 # Per declared path: shallow first, full fallback (pinned commits are often not
 # shallow-fetchable). File-protocol always disabled.
 if [ -f "$SOURCE_DIR/.gitmodules" ]; then
-    mapfile -t SUBMODULE_PATHS < <(
-        git -C "$SOURCE_DIR" config -f .gitmodules --get-regexp '^submodule\..*\.path$' \
-            | awk '{print $2}'
-    )
+    # macOS ships Bash 3.2, so read the list with a portable while loop
+    # rather than the Bash 4 array-read builtin.
+    SUBMODULE_PATHS=()
+    while IFS= read -r _subpath; do
+        [ -n "$_subpath" ] && SUBMODULE_PATHS+=("$_subpath")
+    done < <(git -C "$SOURCE_DIR" config -f .gitmodules --get-regexp '^submodule\..*\.path$' \
+                | awk '{print $2}')
     if [ "${#SUBMODULE_PATHS[@]}" -eq 0 ]; then
         echo "No declared submodule paths in .gitmodules"
         : > "$OUTPUT_DIR/submodules.txt"
