@@ -49,16 +49,31 @@ else
     echo "No LFS filters declared; skipping LFS"
 fi
 
-# Submodules: shallow first, full fallback.
-if git -C "$SOURCE_DIR" config -f .gitmodules --list >/dev/null 2>&1; then
-    echo "Initializing submodules (shallow)"
-    if ! git -C "$SOURCE_DIR" -c protocol.file.allow=never \
-            submodule update --init --recursive --depth=1 2>&1; then
-        echo "Shallow submodule fetch failed; retrying without --depth"
-        git -C "$SOURCE_DIR" -c protocol.file.allow=never \
-            submodule update --init --recursive
+# Submodules: initialize ONLY paths declared in .gitmodules. Some repos leave
+# orphan gitlinks in the tree (a directory recorded with mode 160000) that have
+# no .gitmodules entry - a blanket `--init --recursive` aborts on those with
+# "No url found for submodule path". Enumerating declared paths skips them.
+# Per declared path: shallow first, full fallback (pinned commits are often not
+# shallow-fetchable). File-protocol always disabled.
+if [ -f "$SOURCE_DIR/.gitmodules" ]; then
+    mapfile -t SUBMODULE_PATHS < <(
+        git -C "$SOURCE_DIR" config -f .gitmodules --get-regexp '^submodule\..*\.path$' \
+            | awk '{print $2}'
+    )
+    if [ "${#SUBMODULE_PATHS[@]}" -eq 0 ]; then
+        echo "No declared submodule paths in .gitmodules"
+        : > "$OUTPUT_DIR/submodules.txt"
+    else
+        echo "Declared submodules: ${SUBMODULE_PATHS[*]}"
+        if ! git -C "$SOURCE_DIR" -c protocol.file.allow=never \
+                submodule update --init --recursive --depth=1 -- "${SUBMODULE_PATHS[@]}" 2>&1; then
+            echo "Shallow submodule fetch failed; retrying without --depth"
+            git -C "$SOURCE_DIR" -c protocol.file.allow=never \
+                submodule update --init --recursive -- "${SUBMODULE_PATHS[@]}"
+        fi
+        git -C "$SOURCE_DIR" submodule status -- "${SUBMODULE_PATHS[@]}" \
+            | tee "$OUTPUT_DIR/submodules.txt"
     fi
-    git -C "$SOURCE_DIR" submodule status --recursive | tee "$OUTPUT_DIR/submodules.txt"
 else
     echo "No submodules"
     : > "$OUTPUT_DIR/submodules.txt"
