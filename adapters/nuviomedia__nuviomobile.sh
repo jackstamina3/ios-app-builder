@@ -43,7 +43,18 @@ kotlin.native.jvmArgs=-Xmx3072m
 org.gradle.workers.max=3
 EOF
 
-# 3. Hand the Xcode build stage its environment (sourced by
+# 3. The composeApp :generateRuntimeConfigs Gradle task declares
+#    local.properties as a REQUIRED @InputFile, so Gradle fails validation when
+#    it is absent (upstream developers always have this git-ignored file). It
+#    is a machine-local config file, not app source; create a minimal one. The
+#    backend values (Supabase/Sentry) resolve to empty strings via
+#    runtimeConfigValue's fallback, which is acceptable for a reproducible
+#    unsigned build. NUVIO_IOS_DISTRIBUTION selects the official sideload flavor.
+cat > "$SOURCE_DIR/local.properties" <<'EOF'
+NUVIO_IOS_DISTRIBUTION=full
+EOF
+
+# 4. Hand the Xcode build stage its environment (sourced by
 #    scripts/build_unsigned_app.sh from $HOME/build-env).
 cat > "$HOME/build-env" <<EOF
 JAVA_HOME=$JAVA_HOME
@@ -52,7 +63,7 @@ KOTLIN_DAEMON_JVMARGS=-Xmx2048m
 GRADLE_OPTS=-Xmx1024m -Dfile.encoding=UTF-8
 EOF
 
-# 4. Cheap early verification: downloads the pinned Gradle distribution and
+# 5. Cheap early verification: downloads the pinned Gradle distribution and
 #    proves the JDK works before the expensive xcodebuild stage.
 cd "$SOURCE_DIR"
 export JAVA_HOME
