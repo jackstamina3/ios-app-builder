@@ -25,6 +25,12 @@ result `*.unsigned.ipa` and never describe it as signed.
 8. No shared dependency caches. Isolation beats speed here.
 9. Never claim an unsigned IPA is installable, and never return an old
    artifact after a failed build or relabel a simulator/signed artifact.
+10. Never start a build from an assumed, remembered, or silently reused
+    target. Every build begins by explicitly asking the user which
+    repository and ref to build (see "Target selection is always an explicit
+    first step"). Committed manifests under `targets/` are immutable
+    historical records of past builds — never treat one as the default for a
+    new request.
 
 ## Cost — read before dispatching anything
 
@@ -40,11 +46,40 @@ probe + build ≈ 1,200 billed minutes. Therefore:
 - Retries are manual and deliberate: inspect logs, change the manifest or
   adapter for a log-supported reason, use a fresh request UUID.
 
+## Target selection is always an explicit first step
+
+Before anything else — before reading `targets/`, before probing, before
+touching a runner — ask the user which app to build. Every build starts with
+an explicit question, e.g.:
+
+> "Which repository and ref should I build? Give me `OWNER/REPOSITORY` (or an
+> app name to resolve) and a tag/branch/commit (or say 'latest stable release')."
+
+Rules for this step:
+
+- The question is mandatory on every request, even if the previous request in
+  the session built something, and even if a matching manifest already exists.
+  There is no "same as last time" default.
+- A committed manifest under `targets/` is an **immutable historical record**
+  of a build that already happened — proof of what was built, at which commit,
+  under which toolchain. It is never a menu to pick from and never a default.
+  Do not offer to "reuse" one; if the user names the same app again, that is a
+  new request that produces its own new manifest (a new commit/ref resolves to
+  its own `targets/OWNER__REPOSITORY__SHORTSHA.json`).
+- Only proceed past this step once the user has explicitly named the
+  repository/ref for *this* build. If they are vague ("the streaming app"),
+  resolve candidates and confirm the exact repository before continuing.
+- Re-running an earlier build for reproducibility is allowed, but only when the
+  user explicitly asks for that specific repo+commit again — you still ask, and
+  they still answer with the concrete target.
+
 ## Per-request procedure (user asks to build an iOS app)
 
-1. Parse app name / repository / version. Resolve the official upstream
-   source repository (prefer the developer's org; never a random fork just
-   because it has IPA releases).
+1. **Ask which repository and ref to build** (see the section above — this is
+   mandatory and comes first). Then parse the app name / repository / version
+   from the user's answer and resolve the official upstream source repository
+   (prefer the developer's org; never a random fork just because it has IPA
+   releases). Never skip this by reusing a committed manifest.
 2. Confirm license (`gh api repos/X/license` or the LICENSE file at the
    pinned tree) or explicit user authorization. No basis → stop, report.
 3. Prefer the latest stable (non-draft, non-prerelease) release tag; resolve
@@ -53,8 +88,11 @@ probe + build ≈ 1,200 billed minutes. Therefore:
    the manifest `notes`.
 4. Static probe. Read build docs, upstream CI, `.xcode-version`, dependency
    files. Only if still ambiguous: remote probe via the probe workflow.
-5. Write `targets/OWNER__REPOSITORY__SHORTSHA.json`; write a narrow adapter
-   under `adapters/` only when the structured bootstrap modes don't fit.
+5. Write a **new** `targets/OWNER__REPOSITORY__SHORTSHA.json` for this build
+   (never edit or reuse an existing one as a default — an existing file with
+   the same name means this exact commit was already built, and it stays as
+   the historical record); write a narrow adapter under `adapters/` only when
+   the structured bootstrap modes don't fit.
 6. `python3 scripts/validate_target.py targets/...json` must pass. Run
    `tests/run_tests.sh` if you touched scripts/workflows.
 7. Commit and push (workflows build what's on the branch, not local state).
