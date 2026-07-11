@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "source": {
+    "repository": "NuvioMedia/NuvioMobile",
+    "ref": "0.2.21",
+    "commit": "4e17faa5b8c280f404ee77a811deb9eb7e160c87",
+    "license_spdx": "GPL-3.0",
+    "license_file": "LICENSE"
+  },
+  "runner": "macos-15",
+  "xcode_version": "26.0.1",
+  "working_directory": ".",
+  "container": {
+    "type": "project",
+    "path": "iosApp/iosApp.xcodeproj"
+  },
+  "scheme": "iosApp",
+  "configuration": "Release",
+  "build_action": "archive",
+  "timeout_minutes": 150,
+  "bootstrap": {
+    "kind": "adapter",
+    "adapter": "adapters/nuviomedia__nuviomobile.sh"
+  },
+  "extra_build_settings": {},
+  "output": {
+    "expected_app_bundle": "Nuvio.app"
+  },
+  "notes": "Official Nuvio Mobile, latest stable release 0.2.21 (2026-07-09). Kotlin 2.3.0 / Compose Multiplatform; Xcode phase runs gradlew :composeApp:embedAndSignAppleFrameworkForXcode. NUVIO_IOS_DISTRIBUTION=full (the official sideload distribution; 'appstore' is the review-compliant variant). MPVKit submodule = prebuilt binary xcframeworks. xcode_version to be reconciled against the probe's installed-Xcodes list."
+}

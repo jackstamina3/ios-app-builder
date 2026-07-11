@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "source": {
+    "repository": "Example/App",
+    "ref": "v1.2.3",
+    "commit": "0123456789abcdef0123456789abcdef01234567",
+    "license_spdx": "MIT",
+    "license_file": "LICENSE"
+  },
+  "runner": "macos-15",
+  "xcode_version": "16.4",
+  "working_directory": ".",
+  "container": {
+    "type": "workspace",
+    "path": "App.xcworkspace"
+  },
+  "scheme": "App",
+  "configuration": "Release",
+  "build_action": "archive",
+  "bootstrap": {
+    "kind": "none",
+    "adapter": null
+  },
+  "extra_build_settings": {},
+  "output": {
+    "expected_app_bundle": "sub/App.app"
+  }
+}

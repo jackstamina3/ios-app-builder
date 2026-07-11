@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+# Download and locally verify the unsigned-IPA artifact of a known run.
+# Companion for builds dispatched from a remote Claude session (which can
+# watch runs but cannot download artifacts to your machine).
+#
+# Usage: bin/fetch-artifact RUN_ID REQUEST_ID
+set -euo pipefail
+
+RUN_ID="${1:?usage: bin/fetch-artifact RUN_ID REQUEST_ID}"
+REQUEST_ID="${2:?usage: bin/fetch-artifact RUN_ID REQUEST_ID}"
+cd "$(dirname "$0")/.."
+
+command -v gh >/dev/null || { echo "ERROR: gh not installed" >&2; exit 1; }
+gh auth status --hostname github.com >/dev/null
+[[ "$RUN_ID" =~ ^[0-9]+$ ]] || { echo "ERROR: RUN_ID must be numeric" >&2; exit 1; }
+[[ "$REQUEST_ID" =~ ^[0-9a-f-]{36}$ ]] || { echo "ERROR: REQUEST_ID must be a UUID" >&2; exit 1; }
+
+DEST="dist/$REQUEST_ID"
+mkdir -p "$DEST"
+gh run download "$RUN_ID" -n "unsigned-ipa-$REQUEST_ID" -D "$DEST"
+
+cd "$DEST"
+if command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 -c SHA256SUMS
+else
+    sha256sum -c SHA256SUMS
+fi
+IPA="$(ls -- *.unsigned.ipa | head -1)"
+cd - >/dev/null
+
+bash scripts/verify_unsigned_ipa.sh "$DEST/$IPA"
+
+DIGEST="$(awk '{print $1; exit}' "$DEST/SHA256SUMS")"
+echo ""
+echo "Unsigned IPA: $PWD/$DEST/$IPA"
+echo "SHA-256:      $DIGEST"
+echo "Signing status: unsigned; no embedded provisioning profile."

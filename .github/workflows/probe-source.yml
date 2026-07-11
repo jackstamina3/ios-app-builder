@@ -1,0 +1,180 @@
+# Probe a pinned public iOS source tree on a macOS runner and produce
+# probe-report.json (also printed to the job log between markers so remote
+# sessions can read it without downloading the artifact).
+#
+# The probe is STATIC by default: it inspects files and runs
+# `xcodebuild -list` only. It never auto-executes project-documented commands.
+# An optional bootstrap_hint from the same closed enum as target manifests may
+# run one structured bootstrap mode under the env -i sandbox when a workspace
+# only becomes visible after dependency generation. Anything needing an
+# adapter means: commit the adapter first, then probe again.
+#
+# Cost: macOS minutes bill at a 10x multiplier on private repositories.
+# Prefer bin/probe-source (free local static probe) first.
+name: probe-source
+run-name: "probe ${{ inputs.source_repository }}@${{ inputs.source_ref }} [${{ inputs.request_id }}]"
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_repository:
+        description: Public source repository as OWNER/REPOSITORY
+        required: true
+        type: string
+      source_ref:
+        description: Tag, branch, or ref name to probe
+        required: true
+        type: string
+      source_commit:
+        description: Expected 40-character commit SHA for the ref
+        required: true
+        type: string
+      runner:
+        description: macOS runner label
+        required: true
+        type: choice
+        options:
+          - macos-15
+          - macos-15-intel
+      xcode_version:
+        description: Xcode version to select (must match /Applications/Xcode_<V>.app)
+        required: true
+        type: string
+      bootstrap_hint:
+        description: Optional structured bootstrap to run before listing schemes
+        required: true
+        type: choice
+        default: none
+        options:
+          - none
+          - swiftpm
+          - cocoapods
+          - carthage
+      request_id:
+        description: Unique lowercase UUID for this request
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      repository: ${{ steps.validate.outputs.repository }}
+      ref: ${{ steps.validate.outputs.ref }}
+      commit: ${{ steps.validate.outputs.commit }}
+      runner: ${{ steps.validate.outputs.runner }}
+      xcode_version: ${{ steps.validate.outputs.xcode_version }}
+      bootstrap_hint: ${{ steps.validate.outputs.bootstrap_hint }}
+    steps:
+      - name: Validate inputs
+        id: validate
+        env:
+          SOURCE_REPOSITORY_INPUT: ${{ inputs.source_repository }}
+          SOURCE_REF_INPUT: ${{ inputs.source_ref }}
+          SOURCE_COMMIT_INPUT: ${{ inputs.source_commit }}
+          RUNNER_INPUT: ${{ inputs.runner }}
+          XCODE_VERSION_INPUT: ${{ inputs.xcode_version }}
+          BOOTSTRAP_HINT_INPUT: ${{ inputs.bootstrap_hint }}
+          REQUEST_ID_INPUT: ${{ inputs.request_id }}
+        run: |
+          set -euo pipefail
+          err() { echo "::error::$1" >&2; exit 1; }
+          [[ "$REQUEST_ID_INPUT" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] \
+            || err "request_id must be a lowercase UUID"
+          [[ "$SOURCE_REPOSITORY_INPUT" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] \
+            || err "source_repository must be OWNER/REPOSITORY"
+          [[ "$SOURCE_REF_INPUT" =~ ^[A-Za-z0-9][A-Za-z0-9/._+-]{0,200}$ ]] \
+            || err "source_ref invalid (no leading dash, no metacharacters)"
+          [[ "$SOURCE_COMMIT_INPUT" =~ ^[0-9a-f]{40}$ ]] \
+            || err "source_commit must be 40 lowercase hex characters"
+          case "$RUNNER_INPUT" in macos-15|macos-15-intel) ;; *) err "runner not allowed" ;; esac
+          [[ "$XCODE_VERSION_INPUT" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]] \
+            || err "xcode_version must look like 16.4 or 26.0.1"
+          case "$BOOTSTRAP_HINT_INPUT" in none|swiftpm|cocoapods|carthage) ;; *) err "bootstrap_hint not allowed" ;; esac
+          {
+            echo "repository=$SOURCE_REPOSITORY_INPUT"
+            echo "ref=$SOURCE_REF_INPUT"
+            echo "commit=$SOURCE_COMMIT_INPUT"
+            echo "runner=$RUNNER_INPUT"
+            echo "xcode_version=$XCODE_VERSION_INPUT"
+            echo "bootstrap_hint=$BOOTSTRAP_HINT_INPUT"
+          } >> "$GITHUB_OUTPUT"
+
+  probe:
+    needs: validate
+    runs-on: ${{ needs.validate.outputs.runner }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+
+      - name: Export probe environment
+        env:
+          SOURCE_REPOSITORY: ${{ needs.validate.outputs.repository }}
+          SOURCE_REF: ${{ needs.validate.outputs.ref }}
+          EXPECTED_SHA: ${{ needs.validate.outputs.commit }}
+          XCODE_VERSION: ${{ needs.validate.outputs.xcode_version }}
+          BOOTSTRAP_KIND: ${{ needs.validate.outputs.bootstrap_hint }}
+        run: |
+          set -euo pipefail
+          {
+            echo "SOURCE_REPOSITORY=$SOURCE_REPOSITORY"
+            echo "SOURCE_REF=$SOURCE_REF"
+            echo "EXPECTED_SHA=$EXPECTED_SHA"
+            echo "XCODE_VERSION=$XCODE_VERSION"
+            echo "BOOTSTRAP_KIND=$BOOTSTRAP_KIND"
+            echo "ADAPTER_PATH="
+            echo "WORKING_DIR=."
+            echo "CONTAINER_TYPE="
+            echo "CONTAINER_PATH="
+            echo "SCHEME="
+            echo "CONFIGURATION="
+            echo "BUILD_ACTION="
+            echo "EXPECTED_APP_BUNDLE="
+            echo "EXTRA_SETTINGS_FILE=$RUNNER_TEMP/extra-build-settings.txt"
+            echo "BUILDER_DIR=$GITHUB_WORKSPACE"
+            echo "SAFE_HOME=$RUNNER_TEMP/safe-home"
+            echo "SOURCE_DIR=$RUNNER_TEMP/source"
+            echo "BUILD_DIR=$RUNNER_TEMP/build"
+            echo "OUTPUT_DIR=$RUNNER_TEMP/output"
+          } >> "$GITHUB_ENV"
+          : > "$RUNNER_TEMP/extra-build-settings.txt"
+          mkdir -p "$RUNNER_TEMP/safe-home" "$RUNNER_TEMP/source" "$RUNNER_TEMP/build" \
+                   "$RUNNER_TEMP/output" "$RUNNER_TEMP/tmp"
+
+      - name: Select exact Xcode
+        run: bash scripts/select_xcode.sh
+
+      - name: Clone and verify pinned source
+        run: bash scripts/clone_source.sh
+
+      - name: Optional structured bootstrap (sandboxed)
+        if: needs.validate.outputs.bootstrap_hint != 'none'
+        run: bash scripts/run_sandboxed.sh scripts/bootstrap_dependencies.sh
+        continue-on-error: true
+
+      - name: Probe source tree (sandboxed)
+        run: bash scripts/run_sandboxed.sh scripts/probe_source.sh
+
+      - name: Print probe report to log
+        if: always()
+        run: |
+          set -euo pipefail
+          echo "===== BEGIN probe-report.json ====="
+          cat "$OUTPUT_DIR/probe-report.json" || echo '{"error": "no probe report produced"}'
+          echo ""
+          echo "===== END probe-report.json ====="
+
+      - name: Upload probe artifact
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: probe-${{ inputs.request_id }}
+          path: ${{ runner.temp }}/output/
+          retention-days: 7
+          if-no-files-found: ignore

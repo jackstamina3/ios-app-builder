@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "source": {
+    "repository": "Example-Org/Example.app",
+    "ref": "v1.2.3",
+    "commit": "0123456789abcdef0123456789abcdef01234567",
+    "license_spdx": "MIT",
+    "license_file": "LICENSE"
+  },
+  "runner": "macos-15",
+  "xcode_version": "26.0.1",
+  "working_directory": ".",
+  "container": {
+    "type": "workspace",
+    "path": "App.xcworkspace"
+  },
+  "scheme": "App",
+  "configuration": "Release",
+  "build_action": "archive",
+  "timeout_minutes": 60,
+  "bootstrap": {
+    "kind": "cocoapods",
+    "adapter": null
+  },
+  "extra_build_settings": {
+    "SWIFT_TREAT_WARNINGS_AS_ERRORS": "NO"
+  },
+  "output": {
+    "expected_app_bundle": "App.app"
+  },
+  "notes": "fixture: fully valid manifest incl. 3-component Xcode version"
+}

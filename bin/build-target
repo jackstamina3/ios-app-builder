@@ -1,0 +1,108 @@
+#!/usr/bin/env bash
+# Local dispatcher: run a full remote unsigned build for one committed target
+# manifest and download + verify the result.
+#
+# Usage: bin/build-target targets/OWNER__REPOSITORY__SHORTSHA.json
+#
+# Requires local: gh (authenticated), git, jq, python3.
+# COST: macOS runner minutes bill at a 10x multiplier on private repos.
+set -euo pipefail
+
+TARGET_PATH="${1:?usage: bin/build-target targets/NAME.json}"
+cd "$(dirname "$0")/.."
+
+for tool in gh git jq python3; do
+    command -v "$tool" >/dev/null || { echo "ERROR: $tool not installed" >&2; exit 1; }
+done
+gh auth status --hostname github.com >/dev/null
+
+REPO_NWO="$(gh repo view --json nameWithOwner --jq .nameWithOwner)"
+VISIBILITY="$(gh repo view --json visibility --jq .visibility)"
+DEFAULT_BRANCH="$(gh repo view --json defaultBranchRef --jq .defaultBranchRef.name)"
+if [ "$(printf '%s' "$VISIBILITY" | tr '[:upper:]' '[:lower:]')" != "private" ]; then
+    echo "ERROR: builder repository must be private (is: $VISIBILITY)" >&2
+    exit 1
+fi
+
+[[ "$TARGET_PATH" =~ ^targets/[A-Za-z0-9._-]+\.json$ ]] || { echo "ERROR: bad target path" >&2; exit 1; }
+python3 scripts/validate_target.py "$TARGET_PATH"
+
+# The manifest and adapters must be committed and pushed to the default branch:
+# the workflow builds what is on the branch, not your working tree.
+git fetch origin "$DEFAULT_BRANCH" --quiet
+if ! git diff --quiet "origin/$DEFAULT_BRANCH" -- "$TARGET_PATH" adapters/ scripts/ .github/; then
+    echo "ERROR: local changes to the target/adapters/scripts/workflows are not on origin/$DEFAULT_BRANCH." >&2
+    echo "Commit and push first." >&2
+    exit 1
+fi
+
+# Best-effort billing visibility before spending 10x macOS minutes.
+OWNER="${REPO_NWO%%/*}"
+if BILLING="$(gh api "users/$OWNER/settings/billing/actions" 2>/dev/null)"; then
+    echo "Actions billing (this month): $(printf '%s' "$BILLING" | jq -c '{total_minutes_used, included_minutes}')"
+    echo "Reminder: macOS minutes count 10x against included minutes on private repos."
+fi
+
+REQUEST_ID="$(uuidgen | tr '[:upper:]' '[:lower:]')"
+echo "Request ID: $REQUEST_ID"
+
+PAYLOAD="$(jq -n \
+    --arg ref "$DEFAULT_BRANCH" \
+    --arg target "$TARGET_PATH" \
+    --arg request_id "$REQUEST_ID" \
+    '{ref: $ref, inputs: {target: $target, request_id: $request_id}, return_run_details: true}')"
+
+RESPONSE="$(printf '%s' "$PAYLOAD" | gh api --method POST \
+    "repos/$REPO_NWO/actions/workflows/build-unsigned-ipa.yml/dispatches" \
+    --input - 2>/dev/null || true)"
+RUN_ID="$(printf '%s' "$RESPONSE" | jq -r '.workflow_run_id // empty' 2>/dev/null || true)"
+
+# Fallback: locate the run by the unique request ID embedded in run-name.
+# A dispatched run is not instantly listable, so poll. Never assume the most
+# recent run is ours.
+if [ -z "$RUN_ID" ]; then
+    echo "Dispatch accepted (no run id in response); locating run by request ID..."
+    for _ in $(seq 1 24); do
+        RUN_ID="$(gh run list --workflow build-unsigned-ipa.yml \
+            --json databaseId,displayTitle --limit 30 \
+            --jq ".[] | select(.displayTitle | contains(\"$REQUEST_ID\")) | .databaseId" | head -1)"
+        [ -n "$RUN_ID" ] && break
+        sleep 5
+    done
+fi
+[ -n "$RUN_ID" ] || { echo "ERROR: could not locate dispatched run" >&2; exit 1; }
+echo "Run: https://github.com/$REPO_NWO/actions/runs/$RUN_ID"
+
+DEST="dist/$REQUEST_ID"
+mkdir -p "$DEST"
+
+if ! gh run watch "$RUN_ID" --exit-status --compact; then
+    echo "BUILD FAILED. Failed-step log follows:" >&2
+    gh run view "$RUN_ID" --log-failed || true
+    echo "Downloading diagnostics artifact..." >&2
+    gh run download "$RUN_ID" -n "build-diagnostics-$REQUEST_ID" -D "$DEST/diagnostics" || true
+    echo "Diagnostics (if any): $PWD/$DEST/diagnostics" >&2
+    exit 1
+fi
+
+echo "Downloading unsigned IPA artifact..."
+gh run download "$RUN_ID" -n "unsigned-ipa-$REQUEST_ID" -D "$DEST"
+
+cd "$DEST"
+if command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 -c SHA256SUMS
+else
+    sha256sum -c SHA256SUMS
+fi
+IPA="$(ls -- *.unsigned.ipa | head -1)"
+cd - >/dev/null
+
+# Independent local verification (full on macOS, structural elsewhere).
+bash scripts/verify_unsigned_ipa.sh "$DEST/$IPA"
+
+DIGEST="$(awk '{print $1; exit}' "$DEST/SHA256SUMS")"
+echo ""
+echo "Unsigned IPA: $PWD/$DEST/$IPA"
+echo "SHA-256:      $DIGEST"
+echo "Signing status: unsigned; no embedded provisioning profile."
+echo "This IPA is not installable until it is signed by your own signing process."

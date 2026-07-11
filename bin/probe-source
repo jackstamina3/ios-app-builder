@@ -1,0 +1,100 @@
+#!/usr/bin/env bash
+# Probe a public iOS source repository.
+#
+# Default: FREE local static probe (shallow clone into .tmp/, file inspection
+# only, nothing executed). Use --remote to run the macOS probe workflow
+# (billed at 10x minutes on private repos) when static inspection is not
+# enough - e.g. schemes only exist after dependency generation, or you need
+# the exact runner Xcode/SDK facts.
+#
+# Usage:
+#   bin/probe-source OWNER/REPO REF
+#   bin/probe-source OWNER/REPO REF --remote [--runner macos-15] \
+#       [--xcode 16.4] [--bootstrap-hint none|swiftpm|cocoapods|carthage]
+set -euo pipefail
+
+SOURCE_REPO="${1:?usage: bin/probe-source OWNER/REPO REF [--remote ...]}"
+SOURCE_REF="${2:?usage: bin/probe-source OWNER/REPO REF [--remote ...]}"
+shift 2
+
+REMOTE=no
+RUNNER="macos-15"
+XCODE="16.4"
+HINT="none"
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --remote) REMOTE=yes ;;
+        --runner) RUNNER="${2:?}"; shift ;;
+        --xcode) XCODE="${2:?}"; shift ;;
+        --bootstrap-hint) HINT="${2:?}"; shift ;;
+        *) echo "ERROR: unknown flag $1" >&2; exit 1 ;;
+    esac
+    shift
+done
+
+cd "$(dirname "$0")/.."
+[[ "$SOURCE_REPO" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || { echo "ERROR: bad repo" >&2; exit 1; }
+[[ "$SOURCE_REF" =~ ^[A-Za-z0-9][A-Za-z0-9/._+-]{0,200}$ ]] || { echo "ERROR: bad ref" >&2; exit 1; }
+
+# Resolve the ref to an immutable commit.
+SOURCE_SHA="$(git ls-remote "https://github.com/$SOURCE_REPO.git" "refs/tags/$SOURCE_REF^{}" "refs/tags/$SOURCE_REF" "refs/heads/$SOURCE_REF" \
+    | awk '{print $1; exit}')"
+if [ -z "$SOURCE_SHA" ] && [[ "$SOURCE_REF" =~ ^[0-9a-f]{40}$ ]]; then
+    SOURCE_SHA="$SOURCE_REF"
+fi
+[ -n "$SOURCE_SHA" ] || { echo "ERROR: cannot resolve $SOURCE_REF on $SOURCE_REPO" >&2; exit 1; }
+echo "Resolved $SOURCE_REPO@$SOURCE_REF -> $SOURCE_SHA"
+
+if [ "$REMOTE" = no ]; then
+    WORK=".tmp/probe/${SOURCE_REPO//\//__}-${SOURCE_SHA:0:7}"
+    rm -rf "$WORK"
+    mkdir -p "$WORK"
+    git init -q "$WORK"
+    git -C "$WORK" remote add origin "https://github.com/$SOURCE_REPO.git"
+    git -C "$WORK" fetch --depth=1 origin "$SOURCE_SHA" 2>/dev/null \
+        || git -C "$WORK" fetch --depth=1 origin -- "$SOURCE_REF"
+    git -C "$WORK" checkout --quiet --detach FETCH_HEAD
+    echo "Static probe of $WORK:"
+    python3 scripts/static_probe.py "$WORK"
+    exit 0
+fi
+
+command -v gh >/dev/null || { echo "ERROR: --remote requires gh" >&2; exit 1; }
+command -v jq >/dev/null || { echo "ERROR: --remote requires jq" >&2; exit 1; }
+gh auth status --hostname github.com >/dev/null
+REPO_NWO="$(gh repo view --json nameWithOwner --jq .nameWithOwner)"
+DEFAULT_BRANCH="$(gh repo view --json defaultBranchRef --jq .defaultBranchRef.name)"
+REQUEST_ID="$(uuidgen | tr '[:upper:]' '[:lower:]')"
+echo "Dispatching remote probe (request $REQUEST_ID) - 10x-billed macOS minutes"
+
+PAYLOAD="$(jq -n \
+    --arg ref "$DEFAULT_BRANCH" \
+    --arg repo "$SOURCE_REPO" --arg sref "$SOURCE_REF" --arg sha "$SOURCE_SHA" \
+    --arg runner "$RUNNER" --arg xcode "$XCODE" --arg hint "$HINT" \
+    --arg request_id "$REQUEST_ID" \
+    '{ref: $ref, inputs: {source_repository: $repo, source_ref: $sref,
+      source_commit: $sha, runner: $runner, xcode_version: $xcode,
+      bootstrap_hint: $hint, request_id: $request_id}, return_run_details: true}')"
+
+RESPONSE="$(printf '%s' "$PAYLOAD" | gh api --method POST \
+    "repos/$REPO_NWO/actions/workflows/probe-source.yml/dispatches" --input - 2>/dev/null || true)"
+RUN_ID="$(printf '%s' "$RESPONSE" | jq -r '.workflow_run_id // empty' 2>/dev/null || true)"
+if [ -z "$RUN_ID" ]; then
+    for _ in $(seq 1 24); do
+        RUN_ID="$(gh run list --workflow probe-source.yml \
+            --json databaseId,displayTitle --limit 30 \
+            --jq ".[] | select(.displayTitle | contains(\"$REQUEST_ID\")) | .databaseId" | head -1)"
+        [ -n "$RUN_ID" ] && break
+        sleep 5
+    done
+fi
+[ -n "$RUN_ID" ] || { echo "ERROR: could not locate probe run" >&2; exit 1; }
+echo "Run: https://github.com/$REPO_NWO/actions/runs/$RUN_ID"
+
+gh run watch "$RUN_ID" --exit-status --compact || true
+DEST="dist/probe-$REQUEST_ID"
+mkdir -p "$DEST"
+gh run download "$RUN_ID" -n "probe-$REQUEST_ID" -D "$DEST" || {
+    echo "ERROR: probe artifact missing" >&2; exit 1; }
+echo "Probe report: $PWD/$DEST/probe-report.json"
+jq . "$DEST/probe-report.json" 2>/dev/null || cat "$DEST/probe-report.json"

@@ -1,0 +1,173 @@
+# Build an UNSIGNED iOS IPA from a committed target manifest.
+#
+# Security model:
+# - workflow_dispatch only; inputs identify a committed manifest, never build details.
+# - contents: read is the only permission. No secrets exist or are used.
+# - A cheap Ubuntu "plan" job validates every input and the manifest BEFORE any
+#   10x-billed macOS runner is allocated. The macOS job consumes only
+#   allowlisted plan outputs and re-validates the manifest itself.
+# - Untrusted source code (dependency bootstrap, xcodebuild) runs under env -i
+#   via scripts/run_sandboxed.sh and never sees GITHUB_TOKEN or ACTIONS_* vars.
+# - Actions are GitHub-owned and pinned to full commit SHAs.
+#
+# Cost: macOS minutes bill at a 10x multiplier on private repositories.
+name: build-unsigned-ipa
+run-name: "build ${{ inputs.target }} [${{ inputs.request_id }}]"
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Relative target manifest path under targets/
+        required: true
+        type: string
+      request_id:
+        description: Unique lowercase UUID for this request
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+# One group per target manifest: the same target never builds concurrently.
+# NOTE GitHub keeps at most ONE pending run per group - a third rapid dispatch
+# evicts the queued second one (it does not error).
+concurrency:
+  group: build-${{ inputs.target }}
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      runner: ${{ steps.validate.outputs.runner }}
+      timeout_minutes: ${{ steps.validate.outputs.timeout_minutes }}
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+
+      - name: Validate inputs and target manifest
+        id: validate
+        env:
+          TARGET_INPUT: ${{ inputs.target }}
+          REQUEST_ID_INPUT: ${{ inputs.request_id }}
+        run: |
+          set -euo pipefail
+          if ! [[ "$REQUEST_ID_INPUT" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]]; then
+            echo "::error::request_id must be a lowercase UUID" >&2
+            exit 1
+          fi
+          if ! [[ "$TARGET_INPUT" =~ ^targets/[A-Za-z0-9._-]+\.json$ ]] || [[ "$TARGET_INPUT" == *..* ]]; then
+            echo "::error::target must be a plain file path under targets/" >&2
+            exit 1
+          fi
+          if [ ! -f "$TARGET_INPUT" ]; then
+            echo "::error::target manifest not found: $TARGET_INPUT" >&2
+            exit 1
+          fi
+          python3 scripts/validate_target.py "$TARGET_INPUT" --emit-github-outputs >> "$GITHUB_OUTPUT"
+          echo "Manifest valid: $TARGET_INPUT"
+
+  build:
+    needs: plan
+    runs-on: ${{ needs.plan.outputs.runner }}
+    timeout-minutes: ${{ fromJSON(needs.plan.outputs.timeout_minutes) }}
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+
+      - name: Re-validate manifest and export build environment
+        env:
+          TARGET_INPUT: ${{ inputs.target }}
+          REQUEST_ID_INPUT: ${{ inputs.request_id }}
+        run: |
+          set -euo pipefail
+          [[ "$REQUEST_ID_INPUT" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]]
+          [[ "$TARGET_INPUT" =~ ^targets/[A-Za-z0-9._-]+\.json$ ]]
+          [[ "$TARGET_INPUT" != *..* ]]
+          python3 scripts/validate_target.py "$TARGET_INPUT" \
+            --emit-env \
+            --extra-settings-out "$RUNNER_TEMP/extra-build-settings.txt" >> "$GITHUB_ENV"
+          {
+            echo "TARGET_JSON=$TARGET_INPUT"
+            echo "REQUEST_ID=$REQUEST_ID_INPUT"
+            echo "EXTRA_SETTINGS_FILE=$RUNNER_TEMP/extra-build-settings.txt"
+            echo "BUILDER_DIR=$GITHUB_WORKSPACE"
+          } >> "$GITHUB_ENV"
+
+      - name: Prepare isolated directories
+        run: |
+          set -euo pipefail
+          {
+            echo "SAFE_HOME=$RUNNER_TEMP/safe-home"
+            echo "SOURCE_DIR=$RUNNER_TEMP/source"
+            echo "BUILD_DIR=$RUNNER_TEMP/build"
+            echo "OUTPUT_DIR=$RUNNER_TEMP/output"
+            echo "PACKAGE_DIR=$RUNNER_TEMP/package"
+          } >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TEMP/safe-home" "$RUNNER_TEMP/source" "$RUNNER_TEMP/build" \
+                   "$RUNNER_TEMP/output" "$RUNNER_TEMP/package" "$RUNNER_TEMP/tmp"
+
+      - name: Select exact Xcode
+        run: bash scripts/select_xcode.sh
+
+      - name: Clone and verify pinned source
+        run: bash scripts/clone_source.sh
+
+      - name: Bootstrap dependencies (sandboxed)
+        run: bash scripts/run_sandboxed.sh scripts/bootstrap_dependencies.sh
+
+      - name: Build with signing disabled (sandboxed)
+        run: bash scripts/run_sandboxed.sh scripts/build_unsigned_app.sh
+
+      - name: Remove signing material
+        run: bash scripts/remove_signatures.sh
+
+      - name: Package unsigned IPA
+        run: bash scripts/package_ipa.sh
+
+      - name: Verify unsigned IPA
+        run: bash scripts/verify_unsigned_ipa.sh "$(cat "$OUTPUT_DIR/ipa-path.txt")"
+
+      - name: Write build manifest
+        run: python3 scripts/write_build_manifest.py
+
+      - name: Print report to log
+        run: |
+          set -euo pipefail
+          echo "===== BEGIN build-manifest.json ====="
+          cat "$OUTPUT_DIR/build-manifest.json"
+          echo ""
+          echo "===== END build-manifest.json ====="
+          echo "===== BEGIN SHA256SUMS ====="
+          cat "$OUTPUT_DIR/SHA256SUMS"
+          echo "===== END SHA256SUMS ====="
+
+      - name: Upload unsigned IPA artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: unsigned-ipa-${{ inputs.request_id }}
+          path: |
+            ${{ runner.temp }}/output/*.unsigned.ipa
+            ${{ runner.temp }}/output/SHA256SUMS
+            ${{ runner.temp }}/output/build-manifest.json
+            ${{ runner.temp }}/output/license/
+            ${{ runner.temp }}/output/locks/
+          retention-days: 7
+          if-no-files-found: error
+
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: build-diagnostics-${{ inputs.request_id }}
+          path: |
+            ${{ runner.temp }}/output/xcodebuild.log
+            ${{ runner.temp }}/output/submodules.txt
+            ${{ runner.temp }}/build/xcodebuild-list.json
+            ${{ runner.temp }}/build/Build.xcresult
+          retention-days: 7
+          if-no-files-found: ignore

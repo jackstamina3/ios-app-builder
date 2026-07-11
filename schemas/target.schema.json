@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/jackstamina3/ios-app-builder/schemas/target.schema.json",
+  "title": "Unsigned iOS IPA build target manifest",
+  "description": "A committed description of one reproducible unsigned build. The workflow input identifies a manifest; all build parameters live here, validated by scripts/validate_target.py (the authoritative validator - this schema is documentation plus an optional second check).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "source", "runner", "xcode_version", "container", "scheme", "configuration", "build_action", "bootstrap", "output"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository", "ref", "commit", "license_spdx", "license_file"],
+      "properties": {
+        "repository": { "type": "string", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$" },
+        "ref": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9/._+-]{0,200}$" },
+        "commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "license_spdx": { "type": "string", "pattern": "^[A-Za-z0-9.+-]{1,64}$" },
+        "license_file": { "type": "string", "pattern": "^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$" }
+      }
+    },
+    "runner": { "enum": ["macos-15", "macos-15-intel"] },
+    "xcode_version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+(\\.[0-9]+)?$" },
+    "working_directory": { "type": "string", "pattern": "^\\.$|^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$" },
+    "container": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "path"],
+      "properties": {
+        "type": { "enum": ["project", "workspace"] },
+        "path": { "type": "string", "pattern": "^[A-Za-z0-9 ._-]+(/[A-Za-z0-9 ._-]+)*\\.(xcodeproj|xcworkspace)$" }
+      }
+    },
+    "scheme": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9 ._+-]{0,99}$" },
+    "configuration": { "enum": ["Release", "Debug"] },
+    "build_action": { "enum": ["archive", "build"] },
+    "timeout_minutes": { "type": "integer", "minimum": 10, "maximum": 180 },
+    "bootstrap": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "adapter"],
+      "properties": {
+        "kind": { "enum": ["none", "swiftpm", "cocoapods", "carthage", "adapter"] },
+        "adapter": {
+          "oneOf": [
+            { "type": "null" },
+            { "type": "string", "pattern": "^adapters/[A-Za-z0-9._-]+\\.sh$" }
+          ]
+        }
+      }
+    },
+    "extra_build_settings": {
+      "type": "object",
+      "propertyNames": { "pattern": "^[A-Z0-9_]{1,64}$" },
+      "additionalProperties": { "type": "string", "maxLength": 500 }
+    },
+    "output": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["expected_app_bundle"],
+      "properties": {
+        "expected_app_bundle": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9 ._+-]{0,99}\\.app$" }
+      }
+    },
+    "notes": { "type": "string", "maxLength": 2000 }
+  }
+}
