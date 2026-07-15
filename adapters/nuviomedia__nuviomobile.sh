@@ -14,17 +14,22 @@
 #     gradle.properties (which override project ones) scale that down.
 #   - Supabase/Sentry config values default to empty strings when absent;
 #     no secrets are required to build.
-#   - KNOWN UPSTREAM BUG at 0.2.24 (5230f2b9): a translation update duplicated
-#     the string key "addons_appstore_add_description" in
-#     composeApp/src/commonMain/composeResources/values-it/strings.xml, which
-#     fails Compose Multiplatform's strict resource-key validation
-#     (:composeApp:convertXmlValueResourcesForCommonMain). Already fixed on
-#     upstream's cmp-rewrite branch tip (409a2e9b) but not yet in a tagged
-#     release. Step 3.5 below drops the second (duplicate) occurrence,
-#     mirroring upstream's own fix - narrow, single-key, source-authorized
-#     per this session's build request. Fails loudly if the duplicate isn't
-#     found exactly once, so this adapter cannot silently corrupt a future
-#     commit where the bug is already gone.
+#   - KNOWN UPSTREAM BUG at 0.2.24 (5230f2b9): a translation update pasted a
+#     whole block of "personal media server" strings into
+#     composeApp/src/commonMain/composeResources/values-it/strings.xml a
+#     second time, reusing 6 existing key names (addons_appstore_*,
+#     settings_content_discovery_addons_description_appstore) with different
+#     text. Compose Multiplatform's strict resource-key validation
+#     (:composeApp:convertXmlValueResourcesForCommonMain) rejects the file
+#     outright, and Gradle reports only the first duplicate it hits per run -
+#     the second dispatch of this build hit a *different* one of the 6 after
+#     the first was patched, confirming there wasn't just one. Already fixed
+#     on upstream's cmp-rewrite branch tip (409a2e9b), which deletes the
+#     entire second block. Step 3.5 below does the same thing generically:
+#     for every <string name="..."> in that file, keep the first occurrence
+#     and drop later ones, whichever keys they are. Verified byte-identical
+#     to upstream's actual fixed file for this exact commit. Source-authorized
+#     per this session's build request.
 set -euo pipefail
 
 : "${SOURCE_DIR:?}" "${HOME:?}"
@@ -66,41 +71,42 @@ cat > "$SOURCE_DIR/local.properties" <<'EOF'
 NUVIO_IOS_DISTRIBUTION=full
 EOF
 
-# 3.5. Narrow compatibility patch for the known 0.2.24 duplicate-key bug
-#      (see header comment). Targets exactly one key in one file; aborts the
-#      build rather than guessing if the duplicate isn't found exactly once.
+# 3.5. Compatibility patch for the known 0.2.24 duplicate-key bug (see header
+#      comment). Scoped to one file; for every <string name="..."> keeps the
+#      first occurrence and drops later ones. Verified against this exact
+#      pinned commit to produce output byte-identical to upstream's own fix.
 STRINGS_IT="$SOURCE_DIR/composeApp/src/commonMain/composeResources/values-it/strings.xml"
 if [ -f "$STRINGS_IT" ]; then
     python3 - "$STRINGS_IT" <<'PYEOF'
+import re
 import sys
 
 path = sys.argv[1]
-key = 'name="addons_appstore_add_description"'
+key_re = re.compile(r'<string\s+name="([^"]+)"')
 
-with open(path) as f:
+with open(path, encoding='utf-8') as f:
     lines = f.readlines()
 
+seen = set()
 out = []
-seen = False
-removed = 0
+removed = []
 for line in lines:
-    if key in line:
-        if seen:
-            removed += 1
+    m = key_re.search(line)
+    if m:
+        key = m.group(1)
+        if key in seen:
+            removed.append(key)
             continue
-        seen = True
+        seen.add(key)
     out.append(line)
 
-if removed == 0:
-    print(f"No duplicate '{key}' found in {path}; nothing to patch", file=sys.stderr)
+if not removed:
+    print(f"No duplicate string keys found in {path}; nothing to patch", file=sys.stderr)
     sys.exit(0)
-if removed != 1:
-    print(f"ERROR: expected exactly 1 duplicate '{key}' line, found {removed}", file=sys.stderr)
-    sys.exit(1)
 
-with open(path, 'w') as f:
+with open(path, 'w', encoding='utf-8') as f:
     f.writelines(out)
-print(f"Patched {path}: removed 1 duplicate '{key}' entry")
+print(f"Patched {path}: removed {len(removed)} duplicate key(s): {removed}")
 PYEOF
 fi
 
