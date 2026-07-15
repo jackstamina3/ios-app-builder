@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "source": {
+    "repository": "NuvioMedia/NuvioMobile",
+    "ref": "0.2.24",
+    "commit": "5230f2b9754718fd67cf373af5f8778f0e3a026e",
+    "license_spdx": "GPL-3.0",
+    "license_file": "LICENSE"
+  },
+  "runner": "macos-15",
+  "xcode_version": "26.0.1",
+  "working_directory": ".",
+  "container": {
+    "type": "project",
+    "path": "iosApp/iosApp.xcodeproj"
+  },
+  "scheme": "iosApp",
+  "configuration": "Release",
+  "build_action": "archive",
+  "timeout_minutes": 150,
+  "bootstrap": {
+    "kind": "adapter",
+    "adapter": "adapters/nuviomedia__nuviomobile.sh"
+  },
+  "extra_build_settings": {},
+  "output": {
+    "expected_app_bundle": "Nuvio.app"
+  },
+  "notes": "Official Nuvio Mobile, latest stable release 0.2.24 (2026-07-14). Diffed against the prior 0.2.21 build's commit: composeApp/build.gradle.kts, gradle/libs.versions.toml, gradle-wrapper.properties, .gitmodules, and iosApp.xcodeproj/project.pbxproj are unchanged between 0.2.23 and 0.2.24 (only app Kotlin source changed - mostly watch-progress/Continue Watching work), so the existing adapters/nuviomedia__nuviomobile.sh applies unmodified. KNOWN DISCREPANCY: iosApp/Configuration/Version.xcconfig at this commit still reads MARKETING_VERSION=0.2.23 / CURRENT_PROJECT_VERSION=95 (identical to the 0.2.23 tag's commit) - upstream did not bump the iOS marketing version string for the 0.2.24 tag, so the built app's own Info.plist version will self-report as 0.2.23 (95) even though this manifest's source.ref is the 0.2.24 git tag. Reported here verbatim, not patched. MPVKit submodule pin unchanged (d5cf091c, Nuvio branch). NUVIO_IOS_DISTRIBUTION=full via the adapter, same as the prior build. Xcode 26.0.1 confirmed installed on the macos-15 runner image."
+}
