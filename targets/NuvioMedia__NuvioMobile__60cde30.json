@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "source": {
+    "repository": "NuvioMedia/NuvioMobile",
+    "ref": "0.2.25",
+    "commit": "60cde302ab09a60a9b5daa05eae9284e358e79c1",
+    "license_spdx": "GPL-3.0",
+    "license_file": "LICENSE"
+  },
+  "runner": "macos-15",
+  "xcode_version": "26.0.1",
+  "working_directory": ".",
+  "container": {
+    "type": "project",
+    "path": "iosApp/iosApp.xcodeproj"
+  },
+  "scheme": "iosApp",
+  "configuration": "Release",
+  "build_action": "archive",
+  "timeout_minutes": 150,
+  "bootstrap": {
+    "kind": "adapter",
+    "adapter": "adapters/nuviomedia__nuviomobile.sh"
+  },
+  "extra_build_settings": {},
+  "output": {
+    "expected_app_bundle": "Nuvio.app"
+  },
+  "notes": "Official Nuvio Mobile, latest stable release 0.2.25 (2026-07-15). Diffed against the 0.2.24 build's commit: composeApp/build.gradle.kts, gradle/libs.versions.toml, gradle-wrapper.properties, .gitmodules, and iosApp.xcodeproj/project.pbxproj are byte-identical; MPVKit submodule pin unchanged (d5cf091c). The 0.2.24 duplicate-key bug in values-it/strings.xml is fixed upstream at this commit (0 duplicates found), so adapter step 3.5's patch is a verified no-op here - left in place since it's harmless and self-detecting. KNOWN VERSION-LAG PATTERN (consistent across 0.2.24 and 0.2.25): Version.xcconfig at this commit reads MARKETING_VERSION=0.2.24 / CURRENT_PROJECT_VERSION=96, one release behind the git tag - the built app will self-report as 0.2.24 (96), not 0.2.25. Not patched; reported verbatim. NUVIO_IOS_DISTRIBUTION=full via the adapter. Xcode 26.0.1 confirmed installed on the macos-15 runner image."
+}
