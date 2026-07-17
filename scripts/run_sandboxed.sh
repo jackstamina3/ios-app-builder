@@ -14,11 +14,16 @@
 #
 # A small set of NON-SECRET toolchain-location and android-target variables is
 # forwarded when set: DEVELOPER_DIR (iOS/Xcode), JAVA_HOME / ANDROID_HOME /
-# ANDROID_SDK_ROOT / GRADLE_USER_HOME (android/Gradle), and the validated
-# android manifest values (PLATFORM, GRADLE_TASKS, OUTPUT_APK, APPLICATION_ID,
-# DISTRIBUTION). These are paths and manifest data, never credentials - the
-# secret-stripping property (no GITHUB_TOKEN / GH_TOKEN / ACTIONS_* ever) is
-# unchanged. DEVELOPER_DIR is no longer mandatory (android builds have none).
+# ANDROID_SDK_ROOT (android/Gradle), and the validated android manifest values
+# (PLATFORM, GRADLE_TASKS, OUTPUT_APK, APPLICATION_ID, DISTRIBUTION). These are
+# paths and manifest data, never credentials - the secret-stripping property
+# (no GITHUB_TOKEN / GH_TOKEN / ACTIONS_* ever) is unchanged. DEVELOPER_DIR is
+# no longer mandatory (android builds have none).
+#
+# GRADLE_USER_HOME is deliberately NOT forwarded: Gradle then defaults it to
+# $HOME/.gradle (the fresh, isolated SAFE_HOME), which is also where adapters
+# write gradle.properties. Forwarding it as an empty string would make the
+# wrapper resolve /wrapper/dists at the filesystem root and fail.
 set -euo pipefail
 
 : "${SAFE_HOME:?}" "${SOURCE_DIR:?}" "${BUILD_DIR:?}" "${OUTPUT_DIR:?}" "${BUILDER_DIR:?}"
@@ -46,7 +51,6 @@ exec env -i \
     JAVA_HOME="${JAVA_HOME:-}" \
     ANDROID_HOME="${ANDROID_HOME:-}" \
     ANDROID_SDK_ROOT="${ANDROID_SDK_ROOT:-}" \
-    GRADLE_USER_HOME="${GRADLE_USER_HOME:-}" \
     BUILDER_DIR="$BUILDER_DIR" \
     SOURCE_DIR="$SOURCE_DIR" \
     BUILD_DIR="$BUILD_DIR" \
