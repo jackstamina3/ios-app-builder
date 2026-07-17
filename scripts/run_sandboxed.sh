@@ -11,10 +11,18 @@
 # (CocoaPods trunk, Gradle, Kotlin/Native konan, SwiftPM caches) stay isolated
 # from the runner image's real HOME. GEM_HOME/BUNDLE_PATH keep Ruby installs
 # out of the system gem directory (no sudo, ever).
+#
+# A small set of NON-SECRET toolchain-location and android-target variables is
+# forwarded when set: DEVELOPER_DIR (iOS/Xcode), JAVA_HOME / ANDROID_HOME /
+# ANDROID_SDK_ROOT / GRADLE_USER_HOME (android/Gradle), and the validated
+# android manifest values (PLATFORM, GRADLE_TASKS, OUTPUT_APK, APPLICATION_ID,
+# DISTRIBUTION). These are paths and manifest data, never credentials - the
+# secret-stripping property (no GITHUB_TOKEN / GH_TOKEN / ACTIONS_* ever) is
+# unchanged. DEVELOPER_DIR is no longer mandatory (android builds have none).
 set -euo pipefail
 
 : "${SAFE_HOME:?}" "${SOURCE_DIR:?}" "${BUILD_DIR:?}" "${OUTPUT_DIR:?}" "${BUILDER_DIR:?}"
-: "${RUNNER_TEMP:?}" "${DEVELOPER_DIR:?}"
+: "${RUNNER_TEMP:?}"
 
 SCRIPT="$1"
 if [ ! -f "$BUILDER_DIR/$SCRIPT" ]; then
@@ -34,7 +42,11 @@ exec env -i \
     LANG="en_US.UTF-8" \
     LC_ALL="en_US.UTF-8" \
     CI="1" \
-    DEVELOPER_DIR="$DEVELOPER_DIR" \
+    DEVELOPER_DIR="${DEVELOPER_DIR:-}" \
+    JAVA_HOME="${JAVA_HOME:-}" \
+    ANDROID_HOME="${ANDROID_HOME:-}" \
+    ANDROID_SDK_ROOT="${ANDROID_SDK_ROOT:-}" \
+    GRADLE_USER_HOME="${GRADLE_USER_HOME:-}" \
     BUILDER_DIR="$BUILDER_DIR" \
     SOURCE_DIR="$SOURCE_DIR" \
     BUILD_DIR="$BUILD_DIR" \
@@ -43,11 +55,16 @@ exec env -i \
     SOURCE_REF="${SOURCE_REF:-}" \
     EXPECTED_SHA="${EXPECTED_SHA:-}" \
     WORKING_DIR="${WORKING_DIR:-.}" \
+    PLATFORM="${PLATFORM:-ios}" \
     CONTAINER_TYPE="${CONTAINER_TYPE:-}" \
     CONTAINER_PATH="${CONTAINER_PATH:-}" \
     SCHEME="${SCHEME:-}" \
     CONFIGURATION="${CONFIGURATION:-}" \
     BUILD_ACTION="${BUILD_ACTION:-}" \
+    GRADLE_TASKS="${GRADLE_TASKS:-}" \
+    OUTPUT_APK="${OUTPUT_APK:-}" \
+    APPLICATION_ID="${APPLICATION_ID:-}" \
+    DISTRIBUTION="${DISTRIBUTION:-}" \
     BOOTSTRAP_KIND="${BOOTSTRAP_KIND:-none}" \
     ADAPTER_PATH="${ADAPTER_PATH:-}" \
     EXTRA_SETTINGS_FILE="${EXTRA_SETTINGS_FILE:-/dev/null}" \

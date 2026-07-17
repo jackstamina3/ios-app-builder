@@ -143,7 +143,7 @@ PYEOF
 [ $? -eq 0 ] || FAILURES=$((FAILURES + 1))
 
 # --- 8. gitignore covers dist/ and signing material ----------------------------
-for pat in 'dist/' '*.ipa' '*.p12' '*.mobileprovision' '*.key'; do
+for pat in 'dist/' '*.ipa' '*.apk' '*.keystore' '*.p12' '*.mobileprovision' '*.key'; do
     if grep -qxF "$pat" .gitignore; then
         pass ".gitignore covers $pat"
     else

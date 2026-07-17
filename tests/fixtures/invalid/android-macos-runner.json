@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "platform": "android",
+  "source": {
+    "repository": "Example/AndroidApp",
+    "ref": "1.0.0",
+    "commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "license_spdx": "Apache-2.0",
+    "license_file": "LICENSE"
+  },
+  "runner": "macos-15",
+  "bootstrap": {
+    "kind": "none",
+    "adapter": null
+  },
+  "android": {
+    "gradle_tasks": [":app:assembleDebug"],
+    "output_apk": "app/build/outputs/apk/debug/*.apk"
+  }
+}

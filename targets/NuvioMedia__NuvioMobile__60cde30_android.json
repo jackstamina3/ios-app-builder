@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "platform": "android",
+  "source": {
+    "repository": "NuvioMedia/NuvioMobile",
+    "ref": "0.2.25",
+    "commit": "60cde302ab09a60a9b5daa05eae9284e358e79c1",
+    "license_spdx": "GPL-3.0",
+    "license_file": "LICENSE"
+  },
+  "runner": "ubuntu-latest",
+  "working_directory": ".",
+  "timeout_minutes": 90,
+  "bootstrap": {
+    "kind": "adapter",
+    "adapter": "adapters/nuviomedia__nuviomobile_android.sh"
+  },
+  "extra_build_settings": {},
+  "android": {
+    "gradle_tasks": [":androidApp:assembleFullDebug"],
+    "output_apk": "androidApp/build/outputs/apk/full/debug/*.apk",
+    "application_id": "com.nuviodebug.com",
+    "distribution": "full"
+  },
+  "notes": "Official Nuvio Mobile Android build of the same monorepo/commit as the iOS 0.2.25 target (NuvioMedia__NuvioMobile__60cde30.json); '_android' suffix disambiguates the two platforms at one commit. Debug-signed, sideloadable APK (:androidApp:assembleFullDebug, appId com.nuviodebug.com) from the 'full' sideload flavor - NOT a Play-signed/release build; the auto Android debug keystore is used, no secrets. Runs on ubuntu-latest (no macOS 10x multiplier). VERSION-LAG (as with iOS): iosApp/Configuration/Version.xcconfig / the Android versionName lag the git tag, so the built app self-reports 0.2.24 (versionCode 96), not 0.2.25. FIRE TV CAVEAT: Nuvio has no leanback/Android-TV variant (phone LAUNCHER only, touch UI); it installs and runs on a Fire TV Stick 4K Max 2nd gen (Fire OS 8 / Android 11, arm64) but is navigated as a touch app - drive with a paired Bluetooth mouse/air-remote. Native libs ship arm64-v8a + armeabi-v7a; minSdk 24."
+}

@@ -129,6 +129,47 @@ downloaded from the remote session: give the user
 - Runner: `macos-15` (arm64) unless an Intel-only dependency forces
   `macos-15-intel` — document why.
 
+## Android APK builds (`platform: android`)
+
+The repo also builds **debug-signed Android APKs** from the same kind of
+licensed public source (e.g. a Kotlin/Compose Multiplatform monorepo's Android
+module). This path is deliberately different from iOS, and it **scopes** — does
+not break — the iOS rules above:
+
+- **Installable by design.** Android has no "unsigned installable" concept: an
+  APK must be signed to install at all. The Android path builds the **debug**
+  variant with the auto-generated Android **debug keystore**, producing an
+  installable `*.debug.apk`. The intro line and rules 4/5/9 (unsigned, macOS,
+  `*.unsigned.ipa`, "never installable") describe the **iOS** path only. For
+  Android: name the result `*.debug.apk`, call it "debug-signed; installable via
+  sideload," and **never** call it Play-signed or a release build.
+- **Rule 5 still holds, extended.** No Apple signing material, and for Android
+  **only the auto debug keystore** — never a release/upload keystore, its
+  passwords, or any signing secret in the repo or a manifest. The validator
+  bans keystore/signing keys in `extra_build_settings`; keep it that way.
+- **Runner (scopes rule 4).** Android builds run on **`ubuntu-latest`**, which
+  the manifest's `runner` must declare. There is **no 10x multiplier** on
+  ubuntu — Android builds are essentially free vs. the macOS 10x. Do not run
+  Android on a macOS runner.
+- **Manifest shape.** `platform: "android"`, `runner: "ubuntu-latest"`, and an
+  `android` object: `gradle_tasks` (e.g. `[":app:assembleDebug"]`),
+  `output_apk` (a relative glob to the built APK), optional `application_id`
+  (verified) and `distribution`. The iOS-only fields (`xcode_version`,
+  `container`, `scheme`, `configuration`, `build_action`, `output`) are absent.
+  Rule 10 (explicit target every time; manifests are immutable records) and the
+  full-SHA pin (rule 3) apply unchanged. When one commit is built for both
+  platforms, suffix the android manifest name with `_android` to disambiguate.
+- **Dispatch/report.** Dispatch `build-apk.yml` (same UUID run-name flow); read
+  the JSON report between the `===== BEGIN/END build-manifest.json =====`
+  markers. Report: source repo/ref/commit, license, runner, JDK, package
+  (application id), `versionName`/`versionCode`, ABIs, `*.debug.apk` filename +
+  SHA-256, "debug-signed; installable via sideload; not a release build," and
+  how to fetch it.
+- **TV / Fire TV honesty.** A phone/tablet Android app with no leanback
+  (`LEANBACK_LAUNCHER`) / Android-TV support will install and run on a Fire TV
+  device but is a **touch UI driven by a remote** — say so plainly; making it
+  TV-native needs app-side changes beyond a narrow compatibility patch.
+
 ## Stop-and-report conditions
 
 Binary-only repo; no license/authorization; unresolvable or unfetchable
@@ -140,9 +181,12 @@ or provisioning profile in the output; simulator-only build success.
 
 ## Layout
 
-- `.github/workflows/` — `probe-source.yml`, `build-unsigned-ipa.yml`
-- `scripts/` — validation, clone, sandbox wrapper, bootstrap, build, package,
-  verify, probe, hardening (see headers in each file)
+- `.github/workflows/` — `probe-source.yml`, `build-unsigned-ipa.yml` (iOS),
+  `build-apk.yml` (android, ubuntu)
+- `scripts/` — validation, clone, sandbox wrapper, bootstrap, build/package/
+  verify (iOS: `*_unsigned_app`/`package_ipa`/`verify_unsigned_ipa`; android:
+  `build_apk`/`package_apk`/`verify_apk`), manifest writer, probe, hardening
+  (see headers in each file)
 - `bin/` — `build-target`, `probe-source`, `fetch-artifact` (user-local, gh)
 - `targets/`, `adapters/`, `schemas/`, `tests/`
 - `tests/run_tests.sh` must stay green; it enforces the security invariants

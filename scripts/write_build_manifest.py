@@ -3,7 +3,10 @@
 
 Trusted step: runs in the normal workflow environment AFTER the sandboxed
 build, reading only environment variables the workflow validated and files
-the build produced.
+the build produced. Handles both platforms:
+  - ios     -> unsigned IPA; records Xcode/SDK facts, marks "unsigned": true.
+  - android -> debug-signed APK; records java/SDK facts, marks
+               "signing": "debug" (installable) - never claims unsigned.
 """
 
 import hashlib
@@ -50,11 +53,16 @@ def main():
         print("OUTPUT_DIR missing", file=sys.stderr)
         return 1
 
-    ipa_path = None
-    ipa_file = os.path.join(output_dir, "ipa-path.txt")
-    if os.path.isfile(ipa_file):
-        with open(ipa_file) as f:
-            ipa_path = f.read().strip()
+    platform = env("PLATFORM", "ios")
+
+    # The build stage records the produced artifact's path in a platform file.
+    artifact_path = None
+    artifact_file = os.path.join(
+        output_dir, "apk-path.txt" if platform == "android" else "ipa-path.txt"
+    )
+    if os.path.isfile(artifact_file):
+        with open(artifact_file) as f:
+            artifact_path = f.read().strip()
 
     app_info = {}
     app_info_file = os.path.join(output_dir, "app-info.json")
@@ -68,22 +76,38 @@ def main():
         with open(sub_file) as f:
             submodules = [line.strip() for line in f if line.strip()]
 
-    # Entitlement files present in source (informational: a source build does
-    # not prove the user's downstream signing profile covers them).
-    entitlement_files = []
-    if os.path.isdir(source_dir):
-        for dirpath, dirnames, filenames in os.walk(source_dir):
-            dirnames[:] = [d for d in dirnames if d not in (".git", "Pods", "node_modules")]
-            for fn in filenames:
-                if fn.endswith(".entitlements"):
-                    entitlement_files.append(
-                        os.path.relpath(os.path.join(dirpath, fn), source_dir)
-                    )
-            if len(entitlement_files) >= 50:
-                break
+    environment = {
+        "runner_os": env("RUNNER_OS"),
+        "runner_arch": env("RUNNER_ARCH"),
+        "runner_image": env("ImageOS") or env("IMAGE_OS"),
+    }
+
+    if platform == "android":
+        build_section = {
+            "gradle_tasks": env("GRADLE_TASKS"),
+            "output_apk": env("OUTPUT_APK"),
+            "distribution": env("DISTRIBUTION") or None,
+            "application_id": env("APPLICATION_ID") or None,
+            "bootstrap_kind": env("BOOTSTRAP_KIND"),
+            "adapter_path": env("ADAPTER_PATH") or None,
+            "working_directory": env("WORKING_DIR"),
+        }
+    else:
+        environment["xcode_version_requested"] = env("XCODE_VERSION")
+        environment["developer_dir"] = env("DEVELOPER_DIR")
+        build_section = {
+            "container_type": env("CONTAINER_TYPE"),
+            "container_path": env("CONTAINER_PATH"),
+            "scheme": env("SCHEME"),
+            "configuration": env("CONFIGURATION"),
+            "build_action": env("BUILD_ACTION"),
+            "bootstrap_kind": env("BOOTSTRAP_KIND"),
+            "adapter_path": env("ADAPTER_PATH") or None,
+            "working_directory": env("WORKING_DIR"),
+        }
 
     manifest = {
-        "unsigned": True,
+        "platform": platform,
         "source": {
             "repository": env("SOURCE_REPOSITORY"),
             "ref": env("SOURCE_REF"),
@@ -99,53 +123,71 @@ def main():
             "request_id": env("REQUEST_ID"),
             "target_manifest": env("TARGET_JSON"),
         },
-        "environment": {
-            "runner_label_requested": None,  # recorded via runner facts below
-            "runner_os": env("RUNNER_OS"),
-            "runner_arch": env("RUNNER_ARCH"),
-            "runner_image": env("ImageOS") or env("IMAGE_OS"),
-            "xcode_version_requested": env("XCODE_VERSION"),
-            "developer_dir": env("DEVELOPER_DIR"),
-        },
-        "build": {
-            "container_type": env("CONTAINER_TYPE"),
-            "container_path": env("CONTAINER_PATH"),
-            "scheme": env("SCHEME"),
-            "configuration": env("CONFIGURATION"),
-            "build_action": env("BUILD_ACTION"),
-            "bootstrap_kind": env("BOOTSTRAP_KIND"),
-            "adapter_path": env("ADAPTER_PATH") or None,
-            "working_directory": env("WORKING_DIR"),
-        },
+        "environment": environment,
+        "build": build_section,
         "app": app_info,
-        "entitlement_files_in_source": sorted(entitlement_files),
         "artifact": {},
         "built_at_utc": datetime.now(timezone.utc).isoformat(),
     }
 
-    # Xcode/SDK facts straight from the selected toolchain.
-    try:
-        out = subprocess.run(
-            ["xcodebuild", "-version"], capture_output=True, text=True, check=True,
-            env={**os.environ},
-        ).stdout.strip().splitlines()
-        manifest["environment"]["xcode_version_actual"] = " ".join(out)
-    except (OSError, subprocess.CalledProcessError):
-        pass
-    try:
-        sdk = subprocess.run(
-            ["xcrun", "--sdk", "iphoneos", "--show-sdk-version"],
-            capture_output=True, text=True, check=True, env={**os.environ},
-        ).stdout.strip()
-        manifest["environment"]["iphoneos_sdk"] = sdk
-    except (OSError, subprocess.CalledProcessError):
-        pass
+    if platform == "android":
+        # Debug-signed and installable by design; never claim it is unsigned.
+        manifest["signing"] = "debug"
+        manifest["installable"] = True
+    else:
+        manifest["unsigned"] = True
+        # Entitlement files present in source (informational: a source build
+        # does not prove the user's downstream signing profile covers them).
+        entitlement_files = []
+        if os.path.isdir(source_dir):
+            for dirpath, dirnames, filenames in os.walk(source_dir):
+                dirnames[:] = [d for d in dirnames if d not in (".git", "Pods", "node_modules")]
+                for fn in filenames:
+                    if fn.endswith(".entitlements"):
+                        entitlement_files.append(
+                            os.path.relpath(os.path.join(dirpath, fn), source_dir)
+                        )
+                if len(entitlement_files) >= 50:
+                    break
+        manifest["entitlement_files_in_source"] = sorted(entitlement_files)
 
-    if ipa_path and os.path.isfile(ipa_path):
+    # Toolchain facts straight from the runner.
+    if platform == "android":
+        try:
+            proc = subprocess.run(
+                ["java", "-version"], capture_output=True, text=True, check=True,
+                env={**os.environ},
+            )
+            lines = (proc.stderr or proc.stdout).strip().splitlines()
+            manifest["environment"]["java_version"] = lines[0] if lines else None
+        except (OSError, subprocess.CalledProcessError):
+            pass
+        manifest["environment"]["android_home"] = (
+            env("ANDROID_HOME") or env("ANDROID_SDK_ROOT") or None
+        )
+    else:
+        try:
+            out = subprocess.run(
+                ["xcodebuild", "-version"], capture_output=True, text=True, check=True,
+                env={**os.environ},
+            ).stdout.strip().splitlines()
+            manifest["environment"]["xcode_version_actual"] = " ".join(out)
+        except (OSError, subprocess.CalledProcessError):
+            pass
+        try:
+            sdk = subprocess.run(
+                ["xcrun", "--sdk", "iphoneos", "--show-sdk-version"],
+                capture_output=True, text=True, check=True, env={**os.environ},
+            ).stdout.strip()
+            manifest["environment"]["iphoneos_sdk"] = sdk
+        except (OSError, subprocess.CalledProcessError):
+            pass
+
+    if artifact_path and os.path.isfile(artifact_path):
         manifest["artifact"] = {
-            "filename": os.path.basename(ipa_path),
-            "bytes": os.path.getsize(ipa_path),
-            "sha256": sha256(ipa_path),
+            "filename": os.path.basename(artifact_path),
+            "bytes": os.path.getsize(artifact_path),
+            "sha256": sha256(artifact_path),
         }
 
     # Copy the source license file and any lockfiles into the artifact.
