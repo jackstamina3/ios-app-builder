@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "platform": "android",
+  "source": {
+    "repository": "NuvioMedia/NuvioTV",
+    "ref": "0.7.18",
+    "commit": "849f7020b85971dc3abf7870060737053165ea16",
+    "license_spdx": "GPL-3.0",
+    "license_file": "LICENSE"
+  },
+  "runner": "ubuntu-latest",
+  "working_directory": ".",
+  "timeout_minutes": 90,
+  "bootstrap": {
+    "kind": "adapter",
+    "adapter": "adapters/nuviomedia__nuviotv_android.sh"
+  },
+  "extra_build_settings": {},
+  "android": {
+    "gradle_tasks": [":app:assembleFullRelease"],
+    "output_apk": "app/build/outputs/apk/full/release/*universal*.apk",
+    "distribution": "full"
+  },
+  "notes": "Official NuvioTV, a purpose-built Android-TV app (leanback: android.software.leanback + LEANBACK_LAUNCHER + banner) - installs to the Fire TV home row and is remote-navigable, unlike the NuvioMobile touch app. Single-repo Gradle project (:app), Gradle 8.13 / AGP 8.13.2 / Kotlin 2.3.0, compileSdk 36, minSdk 24. DEBUG-SIGNED via :app:assembleFullRelease with env CI_USE_DEBUG_SIGNING=true (useDebugReleaseSigning) so the release variant signs with the AUTO Android debug keystore - installable via sideload, NOT a Play/release build; no release keystore or secret is used (the debug buildType is wired to an absent ../nuviotv.jks and cannot be used). Build has ABI splits with isUniversalApk=true; output_apk targets the UNIVERSAL split (contains arm64-v8a for the Fire TV Stick 4K Max 2nd gen, Fire OS 8 / Android 11). No NDK: the dovi_bridge CMake native build is gated behind DOVI_NATIVE_ENABLED, set false by the adapter; ffmpeg/torrserver/libdovi are prebuilt & committed and the undeclared libmpv-android gitlink is unreferenced (clone skips it). REF: NuvioTV has NO non-prerelease release; 0.7.18 (849f7020) is the newest tag, marked pre-release/hotfix. application_id intentionally omitted for the first build; the report prints the actual package from aapt badging."
+}
