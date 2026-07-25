@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "platform": "ios",
+  "source": {
+    "repository": "NuvioMedia/NuvioMobile",
+    "ref": "0.3.1",
+    "commit": "b1c9d08435a5b7d7487b30bbf181cb48830c2458",
+    "license_spdx": "GPL-3.0",
+    "license_file": "LICENSE"
+  },
+  "runner": "macos-15",
+  "xcode_version": "26.0.1",
+  "working_directory": ".",
+  "container": {
+    "type": "project",
+    "path": "iosApp/iosApp.xcodeproj"
+  },
+  "scheme": "iosApp",
+  "configuration": "Release",
+  "build_action": "archive",
+  "timeout_minutes": 180,
+  "bootstrap": {
+    "kind": "adapter",
+    "adapter": "adapters/nuviomedia__nuviomobile_ios_engine.sh"
+  },
+  "extra_build_settings": {},
+  "output": {
+    "expected_app_bundle": "Nuvio.app"
+  },
+  "notes": "Official Nuvio Mobile, latest stable release 0.3.1 (tag committed 2026-07-20; GitHub /releases/latest resolves here). TAG TRAP: git also carries 0.4.x/0.5.x/0.6.0-beta.*/1.x tags with HIGHER numbers, but those are the LEGACY React Native/Expo app (App.tsx, ios/Nuvio.xcodeproj) dated 2025-07..2026-03; the Compose Multiplatform rewrite on the cmp-rewrite default branch restarted numbering, so 0.3.1 is the newest by date. Branch head at build time (2fda7772, 2026-07-24) is newer but untagged and still reports MARKETING_VERSION 0.3.1. Version.xcconfig here reads 0.3.1 / build 100 - the version-lag seen in 0.2.24/0.2.25 is GONE, so the app self-reports 0.3.1. NEW BUILD DEPENDENCY: at 0.3.x the iOS 'full' distribution cinterops against an external, locally built NuvioEngine.xcframework at ../nuvio-engine (public GPL-3.0 NuvioMedia/nuvio-engine, NOT a submodule, not fetched by the build); Gradle hard-fails without libCNuvioEngine.a for BOTH ios-arm64 and ios-arm64_x86_64-simulator. The adapter therefore clones nuvio-engine pinned to 86f0865472034e53d14963d88a5e0d48dc033df0 (tag v0.1.0) and runs its scripts/build-apple-xcframework.sh (checksum-verified boost 1.86 / libtorrent 2.0.12 / OpenSSL 3.5.7, CMake+Ninja, xcodebuild -create-xcframework), with NUVIO_BUILD_JOBS=3 to avoid OOM on the ~7 GB runner. Compound engine+app build is why timeout_minutes is 180. Uses a NEW adapter so the 0.2.x manifests' adapter stays byte-identical. NUVIO_IOS_DISTRIBUTION=full (official sideload flavor; 'appstore' skips the engine but drops the addon engine/quickjs/ksoup). MPVKit submodule unchanged (d5cf091c); no duplicate strings.xml keys at this commit, so no resource patch is needed. Xcode 26.0.1 confirmed on the macos-15 image."
+}
