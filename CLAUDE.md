@@ -1,9 +1,15 @@
 # ios-app-builder — operating procedure for Claude Code
 
 This private repository builds **unsigned** iOS IPAs from licensed public
-source on GitHub-hosted macOS runners. The output is never signed and never
-installable as-is; signing is the user's separate downstream step. Name every
-result `*.unsigned.ipa` and never describe it as signed.
+source. The output is never signed and never installable as-is; signing is the
+user's separate downstream step. Name every result `*.unsigned.ipa` and never
+describe it as signed.
+
+> **iOS builds are LOCAL-ONLY and live in `jackstamina3/ios-app-builder-codex`.**
+> That repository holds the working, proven iOS pipeline; this one does not.
+> Read "Relationship to ios-app-builder-codex" below BEFORE planning any iOS
+> build. The GitHub Actions iOS path described further down is **superseded**
+> and must not be dispatched.
 
 ## Non-negotiable rules
 
@@ -14,9 +20,11 @@ result `*.unsigned.ipa` and never describe it as signed.
    binaries, DRM-protected IPAs, or binary-only apps. A release-asset `.ipa`
    is not source; if a project is binary-only there is nothing to build.
 3. Pin sources to a full 40-char commit SHA in a committed target manifest.
-4. GitHub-hosted macOS runners only (`macos-15`, `macos-15-intel`) — unless the
-   user explicitly opts into `self-hosted-macos-arm64` for a given manifest
-   (see "Self-hosted runners"). Never choose self-hosted on your own.
+4. **iOS builds run on the user's own Mac, never on a hosted runner.** No
+   GitHub Actions minutes, no self-hosted Actions runner, and never make this
+   repository public to obtain free runners. The Android path below still uses
+   `ubuntu-latest` (see that section). A normal build request never overrides
+   this; changing it requires the user to revise this guidebook first.
 5. No Apple certificates, profiles, Apple IDs, or signing secrets anywhere in
    this repository. Never use `-allowProvisioningUpdates`.
 6. Workflows stay `workflow_dispatch`-only, `contents: read`-only, with
@@ -33,6 +41,40 @@ result `*.unsigned.ipa` and never describe it as signed.
     first step"). Committed manifests under `targets/` are immutable
     historical records of past builds — never treat one as the default for a
     new request.
+
+## Relationship to ios-app-builder-codex
+
+`jackstamina3/ios-app-builder-codex` is the **canonical iOS builder**. It is
+local-only by policy (`AGENTS.md`), has no `.github/workflows` at all, and a
+test (`tests/test_workflow_policy.py`) fails the suite if a workflow or hosted
+dispatcher reappears. Do not duplicate its pipeline here and do not let this
+repo contradict it. For an iOS build: use that repo.
+
+Facts verified from its committed build records — treat these as the ground
+truth about the user's machine, over anything stated in conversation:
+
+- **The build Mac is Intel, not Apple Silicon.** All seven of its targets pin
+  `macos-15-intel` or `macos-26-intel`. Current machine: macOS 26.
+- **Xcode 26.6, build `17F113`**, pinned per target. It pins the *Apple build
+  number* alongside the version, which this repo's schema does not model.
+- **`configuration: Debug`**, not Release, on every iOS target.
+- **Nuvio Engine is built FROM SOURCE**, not consumed as a prebuilt binary.
+  A checksum-pinned `source_patch` repoints composeApp's
+  `../nuvio-engine/...` lookup to an in-tree `nuvio-engine/`, the engine is
+  cloned at a pinned commit, built with `scripts/build-apple-xcframework.sh`,
+  then verified and smoke-tested with the engine's own scripts. A
+  `source_dependencies` lock pins every third-party license by URL + SHA-256.
+- **NuvioMobile needs an account preflight.** Targets must carry non-empty
+  `NUVIO_SUPABASE_URL` / `NUVIO_SUPABASE_ANON_KEY` in `build_environment`;
+  building with upstream's empty defaults produces an app whose accounts do not
+  work. Only ever a client-public `anon` / `sb_publishable_` key — never a
+  `service_role` JWT or `sb_secret_` key.
+
+Its manifests carry richer fields than this repo's schema supports
+(`source_patch`, `source_dependencies`, `xcode_build`, `build_environment`).
+Do not hand-copy one of its targets into `targets/` here — this repo's
+validator and scripts cannot honor those fields, so the copy would be a
+manifest that lies about what gets built.
 
 ## Cost — read before dispatching anything
 
@@ -125,40 +167,11 @@ downloaded from the remote session: give the user
 
 - Xcode: use the version the source declares (`.xcode-version`, docs), else
   what upstream CI uses, else a compatible installed version — document the
-  choice in `notes`. Never silently take the runner default. On hosted images
-  the value must match `/Applications/Xcode_<VALUE>.app`; on a self-hosted Mac
-  `select_xcode.sh` matches the bundle's real `CFBundleShortVersionString`
-  exactly (so `26.0` will not silently accept an installed `26.0.1`).
-  Three-component versions like `26.0.1` are valid.
+  choice in `notes`. Never silently take the runner default. The value must
+  match `/Applications/Xcode_<VALUE>.app` on the runner image
+  (three-component versions like `26.0.1` are valid).
 - Runner: `macos-15` (arm64) unless an Intel-only dependency forces
   `macos-15-intel` — document why.
-
-## Self-hosted runners (`self-hosted-macos-arm64`)
-
-A manifest may name `self-hosted-macos-arm64` **only when the user explicitly
-asks for it**. It exists for one reason: GitHub-hosted macOS bills at 10x on a
-private repo, and a self-hosted Mac bills nothing. What it changes:
-
-- **`runs-on` is never raw manifest text.** `validate_target.py` maps the
-  manifest's runner key through the fixed `RUNNER_LABELS` table to
-  `[self-hosted, macOS, ARM64]`, and the workflow consumes that via
-  `fromJSON(needs.plan.outputs.runner_labels)`. A manifest can never inject an
-  arbitrary label and steer a build onto some other machine. `tests/run_tests.sh`
-  asserts both halves of this.
-- **The ubuntu plan job is unchanged**, so every input is still validated
-  before the Mac is touched.
-- **The build host is not ephemeral.** This is the real cost, and it must be
-  stated to the user rather than glossed: a hosted runner's VM is destroyed
-  after the job, a personal Mac is not. `run_sandboxed.sh` strips every secret
-  and Actions variable from the environment, but it is **not** a filesystem or
-  network sandbox — untrusted upstream build logic runs as that user.
-- **Never pair self-hosted with a public repository.** Fork pull requests can
-  execute on self-hosted runners; this repo's `workflow_dispatch`-only trigger
-  mitigates it, but the combination is a documented footgun. If the repo is
-  ever made public, move iOS builds back to hosted runners (free on public
-  repos anyway, which removes the reason to self-host).
-- Prerequisites on the Mac: Xcode matching the manifest, plus a JDK 17+ for
-  Gradle-based targets. The adapter fails with an install hint if it is absent.
 
 ## Android APK builds (`platform: android`)
 
