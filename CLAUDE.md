@@ -14,7 +14,9 @@ result `*.unsigned.ipa` and never describe it as signed.
    binaries, DRM-protected IPAs, or binary-only apps. A release-asset `.ipa`
    is not source; if a project is binary-only there is nothing to build.
 3. Pin sources to a full 40-char commit SHA in a committed target manifest.
-4. GitHub-hosted macOS runners only (`macos-15`, `macos-15-intel`).
+4. GitHub-hosted macOS runners only (`macos-15`, `macos-15-intel`) — unless the
+   user explicitly opts into `self-hosted-macos-arm64` for a given manifest
+   (see "Self-hosted runners"). Never choose self-hosted on your own.
 5. No Apple certificates, profiles, Apple IDs, or signing secrets anywhere in
    this repository. Never use `-allowProvisioningUpdates`.
 6. Workflows stay `workflow_dispatch`-only, `contents: read`-only, with
@@ -123,11 +125,40 @@ downloaded from the remote session: give the user
 
 - Xcode: use the version the source declares (`.xcode-version`, docs), else
   what upstream CI uses, else a compatible installed version — document the
-  choice in `notes`. Never silently take the runner default. The value must
-  match `/Applications/Xcode_<VALUE>.app` on the runner image
-  (three-component versions like `26.0.1` are valid).
+  choice in `notes`. Never silently take the runner default. On hosted images
+  the value must match `/Applications/Xcode_<VALUE>.app`; on a self-hosted Mac
+  `select_xcode.sh` matches the bundle's real `CFBundleShortVersionString`
+  exactly (so `26.0` will not silently accept an installed `26.0.1`).
+  Three-component versions like `26.0.1` are valid.
 - Runner: `macos-15` (arm64) unless an Intel-only dependency forces
   `macos-15-intel` — document why.
+
+## Self-hosted runners (`self-hosted-macos-arm64`)
+
+A manifest may name `self-hosted-macos-arm64` **only when the user explicitly
+asks for it**. It exists for one reason: GitHub-hosted macOS bills at 10x on a
+private repo, and a self-hosted Mac bills nothing. What it changes:
+
+- **`runs-on` is never raw manifest text.** `validate_target.py` maps the
+  manifest's runner key through the fixed `RUNNER_LABELS` table to
+  `[self-hosted, macOS, ARM64]`, and the workflow consumes that via
+  `fromJSON(needs.plan.outputs.runner_labels)`. A manifest can never inject an
+  arbitrary label and steer a build onto some other machine. `tests/run_tests.sh`
+  asserts both halves of this.
+- **The ubuntu plan job is unchanged**, so every input is still validated
+  before the Mac is touched.
+- **The build host is not ephemeral.** This is the real cost, and it must be
+  stated to the user rather than glossed: a hosted runner's VM is destroyed
+  after the job, a personal Mac is not. `run_sandboxed.sh` strips every secret
+  and Actions variable from the environment, but it is **not** a filesystem or
+  network sandbox — untrusted upstream build logic runs as that user.
+- **Never pair self-hosted with a public repository.** Fork pull requests can
+  execute on self-hosted runners; this repo's `workflow_dispatch`-only trigger
+  mitigates it, but the combination is a documented footgun. If the repo is
+  ever made public, move iOS builds back to hosted runners (free on public
+  repos anyway, which removes the reason to self-host).
+- Prerequisites on the Mac: Xcode matching the manifest, plus a JDK 17+ for
+  Gradle-based targets. The adapter fails with an install hint if it is absent.
 
 ## Android APK builds (`platform: android`)
 

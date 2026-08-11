@@ -100,6 +100,54 @@ for f in .github/workflows/*.yml; do
     fi
 done
 
+# --- 4b. runs-on labels come from the fixed table, never from manifest text ----
+# A manifest names a runner key; validate_target.py maps it to labels. If a
+# manifest could ever reach runs-on directly it could steer a build onto an
+# arbitrary self-hosted machine, so assert both halves of that contract.
+if grep -E 'runs-on:\s*\$\{\{\s*fromJSON\(needs\.plan\.outputs\.runner_labels\)\s*\}\}' \
+        .github/workflows/build-unsigned-ipa.yml >/dev/null; then
+    pass "build-unsigned-ipa.yml: runs-on derives from the validated label table"
+else
+    fail "build-unsigned-ipa.yml: runs-on must use fromJSON(runner_labels)"
+fi
+
+python3 - <<'PYEOF'
+import json
+import subprocess
+import sys
+
+sys.path.insert(0, "scripts")
+import validate_target as vt
+
+known = set(vt.ALLOWED_RUNNERS) | set(vt.ANDROID_RUNNERS)
+if known != set(vt.RUNNER_LABELS):
+    print(f"FAIL: RUNNER_LABELS does not cover every allowed runner: "
+          f"{known ^ set(vt.RUNNER_LABELS)}", file=sys.stderr)
+    sys.exit(1)
+print("PASS: every allowed runner has a label mapping")
+
+for runner, labels in vt.RUNNER_LABELS.items():
+    if not labels or not all(isinstance(l, str) and l for l in labels):
+        print(f"FAIL: {runner} has a malformed label list: {labels!r}", file=sys.stderr)
+        sys.exit(1)
+print("PASS: every label list is a non-empty list of strings")
+
+# The emitted output must be exactly the table's value for the manifest's key.
+for path in ("targets/NuvioMedia__NuvioMobile__f9ad843.json",
+             "targets/NuvioMedia__NuvioMobile__60cde30.json"):
+    out = subprocess.run(
+        ["python3", "scripts/validate_target.py", path, "--emit-github-outputs"],
+        capture_output=True, text=True, check=True).stdout
+    emitted = dict(line.split("=", 1) for line in out.strip().splitlines())
+    expected = vt.RUNNER_LABELS[emitted["runner"]]
+    if json.loads(emitted["runner_labels"]) != expected:
+        print(f"FAIL: {path} emitted labels {emitted['runner_labels']} != {expected}",
+              file=sys.stderr)
+        sys.exit(1)
+    print(f"PASS: {path} emits the table's labels for {emitted['runner']}")
+PYEOF
+[ $? -eq 0 ] || FAILURES=$((FAILURES + 1))
+
 # --- 5. manifest validator: positive fixtures + real targets ------------------
 for f in tests/fixtures/valid/*.json targets/*.json; do
     [ -e "$f" ] || continue

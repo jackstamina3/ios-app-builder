@@ -11,11 +11,14 @@ set -euo pipefail
 : "${SOURCE_DIR:?}" "${BUILD_DIR:?}" "${OUTPUT_DIR:?}" "${BUILDER_DIR:?}"
 
 echo "Collecting system facts"
-export PROBE_ARCH="$(uname -m)"
-export PROBE_OS_VERSION="$(sw_vers -productVersion 2>/dev/null || echo unknown)"
-export PROBE_XCODE="$(xcodebuild -version 2>/dev/null | tr '\n' ' ' || echo unknown)"
-export PROBE_SDK="$(xcrun --sdk iphoneos --show-sdk-version 2>/dev/null || echo unknown)"
-export PROBE_XCODES="$(ls -1d /Applications/Xcode*.app 2>/dev/null | tr '\n' ',' || true)"
+# Assigned before export: `export VAR="$(...)"` masks the command's exit status
+# from set -e (shellcheck SC2155), which would hide a probe collecting garbage.
+PROBE_ARCH="$(uname -m)"
+PROBE_OS_VERSION="$(sw_vers -productVersion 2>/dev/null || echo unknown)"
+PROBE_XCODE="$(xcodebuild -version 2>/dev/null | tr '\n' ' ' || echo unknown)"
+PROBE_SDK="$(xcrun --sdk iphoneos --show-sdk-version 2>/dev/null || echo unknown)"
+PROBE_XCODES="$(ls -1d /Applications/Xcode*.app 2>/dev/null | tr '\n' ',' || true)"
+export PROBE_ARCH PROBE_OS_VERSION PROBE_XCODE PROBE_SDK PROBE_XCODES
 
 echo "Running static probe"
 python3 "$BUILDER_DIR/scripts/static_probe.py" "$SOURCE_DIR" > "$BUILD_DIR/static-probe.json"

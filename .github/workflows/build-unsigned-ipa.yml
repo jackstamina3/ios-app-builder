@@ -10,7 +10,11 @@
 #   via scripts/run_sandboxed.sh and never sees GITHUB_TOKEN or ACTIONS_* vars.
 # - Actions are GitHub-owned and pinned to full commit SHAs.
 #
-# Cost: macOS minutes bill at a 10x multiplier on private repositories.
+# Cost: GitHub-hosted macOS minutes bill at a 10x multiplier on private
+# repositories. A manifest may instead name the self-hosted-macos-arm64 runner,
+# which bills nothing - at the cost of running untrusted source on a machine
+# that is not destroyed after the job. The cheap ubuntu plan job is unchanged
+# either way, so every input is still validated before any macOS work starts.
 name: build-unsigned-ipa
 run-name: "build ${{ inputs.target }} [${{ inputs.request_id }}]"
 
@@ -42,6 +46,7 @@ jobs:
     timeout-minutes: 10
     outputs:
       runner: ${{ steps.validate.outputs.runner }}
+      runner_labels: ${{ steps.validate.outputs.runner_labels }}
       timeout_minutes: ${{ steps.validate.outputs.timeout_minutes }}
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
@@ -72,7 +77,10 @@ jobs:
 
   build:
     needs: plan
-    runs-on: ${{ needs.plan.outputs.runner }}
+    # Label list comes from the validator's fixed runner->labels table, never
+    # from raw manifest text. GitHub-hosted targets resolve to a single hosted
+    # label; self-hosted-macos-arm64 resolves to [self-hosted, macOS, ARM64].
+    runs-on: ${{ fromJSON(needs.plan.outputs.runner_labels) }}
     timeout-minutes: ${{ fromJSON(needs.plan.outputs.timeout_minutes) }}
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6

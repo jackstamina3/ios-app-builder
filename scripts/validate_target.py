@@ -47,8 +47,19 @@ RE_APPLICATION_ID = re.compile(r"^[A-Za-z0-9_.]{1,128}$")
 # Relative path to the built APK, allowing a single '*' glob per segment.
 RE_APK_GLOB = re.compile(r"^[A-Za-z0-9._*-]+(/[A-Za-z0-9._*-]+)*$")
 
-ALLOWED_RUNNERS = ("macos-15", "macos-15-intel")
+ALLOWED_RUNNERS = ("macos-15", "macos-15-intel", "self-hosted-macos-arm64")
 ANDROID_RUNNERS = ("ubuntu-latest",)
+
+# A manifest never supplies raw `runs-on` labels; it names one of the runners
+# above and this table maps it to the label list the workflow uses. Keeping the
+# mapping here means an untrusted manifest can never inject an arbitrary label
+# (e.g. steering a build onto some other machine's runner).
+RUNNER_LABELS = {
+    "macos-15": ["macos-15"],
+    "macos-15-intel": ["macos-15-intel"],
+    "self-hosted-macos-arm64": ["self-hosted", "macOS", "ARM64"],
+    "ubuntu-latest": ["ubuntu-latest"],
+}
 
 # Signing must never be reintroduced through extra_build_settings. Substring
 # matching intentionally over-blocks (any *CODE_SIGN* key, any Android
@@ -200,6 +211,7 @@ def validate_common(manifest):
         "license_spdx": spdx,
         "license_file": license_file,
         "runner": runner,
+        "runner_labels": RUNNER_LABELS[runner],
         "working_directory": working_directory,
         "timeout_minutes": timeout,
         "bootstrap_kind": kind,
@@ -335,6 +347,8 @@ def main(argv):
 
     if "--emit-github-outputs" in flags:
         print(f"runner={values['runner']}")
+        # Compact JSON so the workflow can fromJSON() it straight into runs-on.
+        print("runner_labels=" + json.dumps(values["runner_labels"], separators=(",", ":")))
         print(f"timeout_minutes={values['timeout_minutes']}")
         print(f"platform={platform}")
         if platform == "ios":
